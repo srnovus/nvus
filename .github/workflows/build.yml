@@ -1,0 +1,28 @@
+name: Build Frontend
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Build Frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Create Artifact
+        run: |
+          mkdir nvus
+          cp -r build/* nvus/
+          zip -r nvus.zip nvus
+
+      - name: Upload Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v1.0.0
+          artifacts: nvus.zip
