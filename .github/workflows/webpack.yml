@@ -59,25 +59,6 @@ jobs:
         with:
           name: nvus.zip
 
-      # Install unzip tool and deploy
-      - name: Deploy to Surge
-        run: |
-          sudo apt-get update -y && sudo apt-get install -y unzip
-          unzip nvus.zip -d dist
-          npx -y surge dist ${{ github.ref_name }}.surge.sh
-        env:
-          SURGE_LOGIN: ${{ secrets.SURGE_LOGIN }}
-          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
-
-  deploy-pages:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      # Download the artifact from the build job
-      - name: Download artifact for pages deployment
-        uses: actions/download-artifact@v3
-        with:
-          name: nvus.zip
 
       # Unzip and deploy to GitHub Pages
       - name: Deploy to GitHub Pages
