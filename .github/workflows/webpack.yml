@@ -1,76 +1,94 @@
-name: NodeJS with Webpack
+name: NodeJS Build and Deploy
 
 on:
   push:
-    tags:        
+    branches:
+      - main  # Ajusta el nombre de tu rama principal si es necesario
+    tags:
       - '*'
-    
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18.x]
-    
     steps:
-    - uses: actions/checkout@v3
+      # Check out the repository code
+      - uses: actions/checkout@v3
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
+      # Set up Node.js version
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
 
-    - id: set_var
-      run: |
-          content=`cat ./package.json`
-          # the following lines are only required for multi line json
-          content="${content//'%'/'%25'}"
-          content="${content//$'\n'/'%0A'}"
-          content="${content//$'\r'/'%0D'}"
-          # end of optional handling for multi line json
-          echo "::set-output name=packageJson::$content"
+      # Install dependencies and tools
+      - name: Install dependencies
+        run: |
+          yarn install --ignore-scripts
+          sudo apt-get update -y && sudo apt-get install -y zip
 
-    - name: Build
-      run: |
-        npx yarn
-        # Build one time for release
-        export NODE_ENV=production
-        yarn build
-        mv static dist
-        zip -r static.zip dist
-        # Build one time for showcase
-        export NODE_ENV=development
-        export FE_SUBDIRECTORY=Mangane
-        yarn build
+      # Lint and check for i18n updates
+      - name: Lint and check locale files
+        run: |
+          yarn lint
+          yarn i18n && git diff --quiet || (echo "Locale files are out of date. Please run 'yarn i18n'" && exit 1)
 
-    - name: Create Draft Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
-      with:
-        tag_name: ${{fromJson(steps.set_var.outputs.packageJson).version}}
-        release_name: ${{fromJson(steps.set_var.outputs.packageJson).version}}
-        draft: true
-        prerelease: false
-        
-    - uses: actions/upload-release-asset@v1.0.1
-      env:
-        GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./static.zip
-        asset_name: static.zip
-        asset_content_type: application/zip
+      # Build the project
+      - name: Build project
+        run: |
+          NODE_ENV=production yarn build
+          cp dist/index.html dist/404.html
+          cd dist && zip -r ../nvus.zip . && cd ..
 
-    - uses: eregon/publish-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
-      with:
-        release_id: ${{ steps.create_release.outputs.id }}
+      # Upload the artifact (zip file) for later stages
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: nvus.zip
+          path: nvus.zip
 
-    - name: Deploy 🚀
-      uses: JamesIves/github-pages-deploy-action@v4
-      with:
-        folder: static/nvus
+  deploy-review:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: review/${{ github.ref_name }}
+      url: https://${{ github.ref_name }}.gitlab.com  # Adjust according to your needs
+    steps:
+      # Download the artifact from the previous build job
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: nvus.zip
+
+      # Install unzip tool and deploy
+      - name: Deploy to Surge
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y unzip
+          unzip nvus.zip -d dist
+          npx -y surge dist ${{ github.ref_name }}.surge.sh
+        env:
+          SURGE_LOGIN: ${{ secrets.SURGE_LOGIN }}
+          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
+
+  deploy-pages:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      # Download the artifact from the build job
+      - name: Download artifact for pages deployment
+        uses: actions/download-artifact@v3
+        with:
+          name: nvus.zip
+
+      # Unzip and deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y unzip
+          unzip nvus.zip -d public
+
+      # Push to GitHub Pages
+      - name: Push to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          folder: public
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
